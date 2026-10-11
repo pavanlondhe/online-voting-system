@@ -1,0 +1,234 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String            @id @default(uuid())
+  email            String            @unique
+  phone            String            @unique
+  fullName         String
+  passwordHash     String
+  role             String            @default("VOTER") // SUPER_ADMIN, STATE_ELECTION_ADMIN, DISTRICT_ELECTION_OFFICER, RETURNING_OFFICER, AUDITOR, CANDIDATE, VOTER
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  voterProfile     VoterProfile?
+  candidateProfile CandidateProfile?
+  auditLogs        AuditLog[]
+  notifications    Notification[]
+  reviewedNominations Nomination[]   @relation("ReviewedByAdmin")
+}
+
+model District {
+  id             String          @id @default(uuid())
+  name           String          @unique
+  nameMr         String?
+  nameHi         String?
+  code           String          @unique
+  division       String          // Konkan, Pune, Nashik, Marathwada, Vidarbha, etc.
+  state          String          @default("Maharashtra")
+  constituencies Constituency[]
+  voterProfiles  VoterProfile[]
+  elections      Election[]
+}
+
+model Constituency {
+  id            String         @id @default(uuid())
+  name          String
+  nameMr        String?
+  nameHi        String?
+  code          String         @unique
+  type          String         // ASSEMBLY, PARLIAMENTARY, MUNICIPAL, PANCHAYAT, STUDENT
+  districtId    String
+  district      District       @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  voterProfiles VoterProfile[]
+  elections     Election[]
+  candidates    CandidateProfile[]
+}
+
+model VoterProfile {
+  id               String              @id @default(uuid())
+  userId           String              @unique
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  voterUid         String              @unique // Demo voter ID like MH-VTR-2026-XXXX
+  dateOfBirth      DateTime?
+  gender           String?             // MALE, FEMALE, OTHER
+  districtId       String
+  district         District            @relation(fields: [districtId], references: [id])
+  constituencyId   String
+  constituency     Constituency        @relation(fields: [constituencyId], references: [id])
+  address          String?
+  isVerified       Boolean             @default(true)
+  participations   VoteParticipation[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+}
+
+model CandidateProfile {
+  id                 String              @id @default(uuid())
+  userId             String              @unique
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  partyAffiliation   String              @default("Independent")
+  symbolName         String              // e.g. Tree, Book, Lamp, Sun, Pen
+  symbolIcon         String?             // icon name or svg
+  photoUrl           String?
+  manifesto          String?
+  biography          String?
+  education          String?
+  assetsDeclaration  String?
+  constituencyId     String?
+  constituency       Constituency?       @relation(fields: [constituencyId], references: [id])
+  nominations        Nomination[]
+  electionCandidates ElectionCandidate[]
+  ballots            Ballot[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+}
+
+model Election {
+  id                    String              @id @default(uuid())
+  title                 String
+  titleMr               String?
+  titleHi               String?
+  description           String?
+  electionType          String              // ASSEMBLY, PARLIAMENTARY, MUNICIPAL_CORP, MUNICIPAL_COUNCIL, GRAM_PANCHAYAT, STUDENT
+  status                String              @default("SCHEDULED") // DRAFT, SCHEDULED, ACTIVE, PAUSED, CLOSED, RESULTS_DECLARED
+  startDate             DateTime
+  endDate               DateTime
+  districtId            String?
+  district              District?           @relation(fields: [districtId], references: [id])
+  constituencyId        String?
+  constituency          Constituency?       @relation(fields: [constituencyId], references: [id])
+  createdByUserId       String?
+  totalEligibleVoters   Int                 @default(0)
+  candidates            ElectionCandidate[]
+  nominations           Nomination[]
+  participations        VoteParticipation[]
+  ballots               Ballot[]
+  receipts              VoteReceipt[]
+  results               ElectionResult?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+}
+
+model ElectionCandidate {
+  id          String           @id @default(uuid())
+  electionId  String
+  election    Election         @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  ballotOrder Int              @default(1)
+  status      String           @default("CONTESTING") // CONTESTING, WITHDRAWN, DISQUALIFIED
+  createdAt   DateTime         @default(now())
+
+  @@unique([electionId, candidateId])
+}
+
+model Nomination {
+  id               String           @id @default(uuid())
+  electionId       String
+  election         Election         @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  candidateId      String
+  candidate        CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  nominationDate   DateTime         @default(now())
+  status           String           @default("PENDING") // PENDING, APPROVED, REJECTED
+  affidavitSummary String?
+  reviewedByUserId String?
+  reviewedBy       User?            @relation("ReviewedByAdmin", fields: [reviewedByUserId], references: [id])
+  reviewRemarks    String?
+  reviewedAt       DateTime?
+
+  @@unique([electionId, candidateId])
+}
+
+// PRIVACY ENFORCEMENT:
+// VoteParticipation tracks WHO voted in WHICH election, but stores ZERO candidate choice!
+model VoteParticipation {
+  id          String       @id @default(uuid())
+  voterId     String
+  voter       VoterProfile @relation(fields: [voterId], references: [id], onDelete: Cascade)
+  electionId  String
+  election    Election     @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  votedAt     DateTime     @default(now())
+  receiptId   String       @unique
+
+  @@unique([voterId, electionId]) // Guaranteed single vote per election
+}
+
+// PRIVACY ENFORCEMENT:
+// Ballot records anonymous selections with zero linkage back to voter identity!
+model Ballot {
+  id          String            @id @default(uuid())
+  electionId  String
+  election    Election          @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  candidateId String?
+  candidate   CandidateProfile? @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  isNota      Boolean           @default(false)
+  ballotHash  String            @unique // Cryptographic random hash representing anonymous ballot
+  castAt      DateTime          @default(now())
+}
+
+// PRIVACY ENFORCEMENT:
+// Receipt contains transaction verification info but strictly NEVER stores selected candidate!
+model VoteReceipt {
+  id               String   @id @default(uuid())
+  receiptNumber    String   @unique // Format: MV-2026-XXXX-XXXX
+  electionId       String
+  election         Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  timestamp        DateTime @default(now())
+  verificationHash String   // SHA-256 integrity verification hash
+}
+
+model ElectionResult {
+  id               String   @id @default(uuid())
+  electionId       String   @unique
+  election         Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  totalVotesCast   Int      @default(0)
+  notaCount        Int      @default(0)
+  turnoutPercentage Float   @default(0)
+  talliesJson      String   // JSON containing candidate tallies: [{candidateId, name, party, votes, percentage, isWinner}]
+  winnerSummary    String?
+  declaredAt       DateTime @default(now())
+}
+
+model OTPChallenge {
+  id         String   @id @default(uuid())
+  identifier String   // email or phone
+  otpCode    String
+  purpose    String   @default("LOGIN") // LOGIN, REGISTER, VOTE_AUTH
+  attempts   Int      @default(0)
+  maxAttempts Int     @default(3)
+  expiresAt  DateTime
+  isUsed     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // e.g. ELECTION_CREATED, VOTE_CAST_ATTEMPT, NOMINATION_REVIEWED, ADMIN_LOGIN
+  resource  String   // e.g. Election, User, Nomination
+  details   String?  // JSON or text description
+  ipAddress String?
+  userAgent String?
+  severity  String   @default("INFO") // INFO, WARNING, CRITICAL
+  timestamp DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // INFO, SUCCESS, WARNING, ALERT
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+}

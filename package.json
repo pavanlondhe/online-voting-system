@@ -1,0 +1,23 @@
+{
+  "name": "mahavote",
+  "version": "1.0.0",
+  "description": "MahaVote — Maharashtra Online Voting Management System (Educational Demo)",
+  "scripts": {
+    "dev:server": "npm --prefix server run dev",
+    "dev:client": "npm --prefix client run dev",
+    "dev": "npm --prefix server run dev",
+    "build": "npm --prefix server run build && npm --prefix client run build",
+    "test": "npm --prefix server run test",
+    "seed": "npm --prefix server run prisma:seed",
+    "db:push": "npm --prefix server run prisma:push"
+  },
+  "keywords": [
+    "mahavote",
+    "voting-management-system",
+    "election-portal",
+    "maharashtra",
+    "evm-simulation"
+  ],
+  "author": "MahaVote Educational Technical Cell",
+  "license": "MIT"
+}
